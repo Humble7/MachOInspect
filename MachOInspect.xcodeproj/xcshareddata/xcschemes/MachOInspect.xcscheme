@@ -56,23 +56,7 @@
             isEnabled = "YES">
          </CommandLineArgument>
          <CommandLineArgument
-            argument = "&quot;${SRCROOT}/MachOHackedProduct/Hacked&quot;"
-            isEnabled = "YES">
-         </CommandLineArgument>
-         <CommandLineArgument
-            argument = "&quot;load&quot;"
-            isEnabled = "YES">
-         </CommandLineArgument>
-         <CommandLineArgument
-            argument = "&quot;czld&quot;"
-            isEnabled = "YES">
-         </CommandLineArgument>
-         <CommandLineArgument
-            argument = "&quot;C String Literals&quot;"
-            isEnabled = "YES">
-         </CommandLineArgument>
-         <CommandLineArgument
-            argument = "&quot;__TEXT,__objc_methname&quot;"
+            argument = "&quot;${SRCROOT}/MachOHackedProduct/load_method.json&quot;"
             isEnabled = "YES">
          </CommandLineArgument>
       </CommandLineArguments>

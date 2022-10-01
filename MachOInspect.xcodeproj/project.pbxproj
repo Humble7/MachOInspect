@@ -234,6 +234,7 @@
 		82DA200828E3F7A0002B0CD8 /* CMDManager.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = CMDManager.mm; sourceTree = "<group>"; };
 		82DA200D28E3F818002B0CD8 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
 		82DA200F28E3F821002B0CD8 /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = System/Library/Frameworks/Cocoa.framework; sourceTree = SDKROOT; };
+		82DA209828E88A45002B0CD8 /* load_method.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = load_method.json; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -522,6 +523,7 @@
 		82DA208F28E7F02C002B0CD8 /* MachOHackedProduct */ = {
 			isa = PBXGroup;
 			children = (
+				82DA209828E88A45002B0CD8 /* load_method.json */,
 			);
 			path = MachOHackedProduct;
 			sourceTree = "<group>";
