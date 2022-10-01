@@ -57,7 +57,17 @@ typedef std::map<uint64_t,uint64_t>                             ExceptionFrameMa
   ExceptionFrameMap       lsdaInfo;         // LSDA info lookup table by address
   
   NSMutableDictionary *   symbolNames;      // symbol names by address
+    NSMutableDictionary *   bindSymbolForAddr;      // bind Symbol For address
+    const section_64 *__objc_nlclslist_64;
+    const section_64 *__objc_nlcatlist_64;
+    const section *__objc_nlclslist;
+    const section *__objc_nlcatlist;
 }
+
+@property (nonatomic, strong) NSMutableArray *nlclslist64;
+@property (nonatomic, strong) NSMutableArray *classLoadMethods64;
+@property (nonatomic, strong) NSMutableArray *nlclslist;
+@property (nonatomic, strong) NSMutableArray *classLoadMethods;
 
 + (MachOLayout *)layoutWithDataController:(MVDataController *)dc rootNode:(MVNode *)node;
 
@@ -90,5 +100,7 @@ typedef std::map<uint64_t,uint64_t>                             ExceptionFrameMa
 - (void)addRelocAtFileOffset:(uint32_t)offset withLength:(uint32_t)length andValue:(uint64_t)value;
 
 - (BOOL)isDylibStub;
+
+- (NSDictionary *)getLazyClassInfo;
 
 @end

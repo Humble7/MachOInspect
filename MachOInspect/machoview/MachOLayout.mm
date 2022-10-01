@@ -20,6 +20,9 @@
 
 using namespace std;
 
+#define LOADSYMBOL "load"
+#define CZLDSYMBOL "czld"
+
 //============================================================================
 @implementation MachOLayout
 
@@ -36,6 +39,11 @@ using namespace std;
   if (self = [super initWithDataController:dc rootNode:node])
   {
     symbolNames = [[NSMutableDictionary alloc] init];
+      bindSymbolForAddr = [NSMutableDictionary dictionary];
+      self.classLoadMethods = [NSMutableArray array];
+      self.classLoadMethods64 = [NSMutableArray array];
+      self.nlclslist64 = [NSMutableArray array];
+      self.nlclslist = [NSMutableArray array];
   }
   return self;
 }
@@ -2490,6 +2498,296 @@ struct CompareSectionByName
   }
   
   [super doMainTasks];
+}
+
+#pragma mark - Analysis Mach-O nonlazy class
+- (NSDictionary *)getLazyClassInfo {
+    if ([self is64bit]) {
+        return [self getSectionInfo64];
+    } else {
+        return [self getSectionInfo];
+    }
+}
+
+- (NSDictionary *)getSectionInfo64 {
+    for (Section64Vector::const_iterator sectIter = ++sections_64.begin(); sectIter != sections_64.end(); ++sectIter) {
+        struct section_64 const *section_64 = *sectIter;
+        
+        if (section_64->offset == 0) {
+            continue;
+        }
+        
+        // TODO: CZDATA
+        if (!strcmp(section_64->sectname, "__objc_nlclslist__DATA_CONST") ||
+            !strcmp(section_64->sectname, "__objc_nlclslist__DATA") || !strcmp(section_64->sectname, "__objc_nlclslist__CZDATA")) {
+            __objc_nlclslist_64 = section_64;
+        }
+        
+        if (!strcmp(section_64->sectname, "__objc_nlcatlist__DATA_CONST") ||
+            !strcmp(section_64->sectname, "__objc_nlcatlist__DATA") ||
+            !strcmp(section_64->sectname, "__objc_nlcatlist__CZDATA")) {
+            __objc_nlcatlist_64 = section_64;
+        }
+    }
+    
+    return [self getNonLazyClasses64];
+}
+
+- (NSDictionary *)getNonLazyClasses64 {
+    if (__objc_nlclslist_64 == NULL && __objc_nlcatlist_64 == NULL) {
+        return nil;
+    }
+    
+    NSArray *clslist = [self getNonLazyClassesInclslist];
+    NSArray *catlist = [self getNonLazyclassesIncatlist];
+    NSDictionary *result = @{@"clslist" : clslist, @"catlist" : catlist};
+    return result;
+}
+
+- (NSDictionary *)getSectionInfo {
+    for (SectionVector::const_iterator secIter = ++sections.begin(); secIter != sections.end(); ++secIter) {
+        struct section const * section = *secIter;
+        if (section->offset == 0) {
+            continue;
+        }
+        
+        if (!strcmp(section->sectname, "__objc_nlclslist__DATA_CONST") || !strcmp(section->sectname, "__objc_nlclslist__DATA") || !strcmp(section->sectname, "__objc_nlclslist__CZDATA")) {
+            __objc_nlclslist = section;
+        }
+        
+        if (!strcmp(section->sectname, "__objc_nlcatlist__DATA_CONST") || !strcmp(section->sectname, "__objc_nlcatlist__DATA") || !strcmp(section->sectname, "__objc_nlcatlist__CZDATA")) {
+            __objc_nlcatlist = section;
+        }
+        
+    }
+    
+    return [self getNonLazyClasses];
+}
+
+- (NSDictionary *)getNonLazyClasses {
+    if (__objc_nlclslist == NULL && __objc_nlcatlist == NULL) {
+        return nil;
+    }
+    
+    NSArray *clslist = [self getNonLazyClassesInclslist];
+    NSArray *catlist = [self getNonLazyclassesIncatlist];
+    NSDictionary *result = @{@"clslist" : clslist, @"catlist" : catlist};
+    return result;
+}
+
+- (NSArray *)getNonLazyClassesInclslist {
+    if (__objc_nlclslist_64 == NULL) {
+        return @[];
+    }
+    
+    // location -> __objc_nlclslist _OBJC_CLASS
+    NSUInteger location = __objc_nlclslist_64->offset + imageOffset;
+    NSUInteger length = __objc_nlclslist_64->size;
+    NSRange range = NSMakeRange(location, 0);
+    NSString *lastReadHex;
+    
+    while (NSMaxRange(range) < location + length) {
+        // rva64 -> __objc_data _OBJC_METACLASS
+        uint64_t rva64 = [dataController read_uint64:range lastReadHex:&lastReadHex];
+        uint64_t class_addr = rva64;
+        [self scheduleClassLoad64:class_addr];
+    }
+    
+    return self.nlclslist64;
+}
+
+- (NSArray *)getNonLazyclassesIncatlist {
+    if (__objc_nlcatlist_64 == NULL) {
+        // TODO: why exit directlly
+//        exit(1);
+        return @[];
+    }
+    
+    NSMutableArray *catlist = [NSMutableArray array];
+    // location -> __objc_nlcatlist _OBJC_$CATEGORY
+    NSUInteger location = __objc_nlcatlist_64->offset + imageOffset;
+    NSUInteger length = __objc_nlcatlist_64->size;
+    NSRange range = NSMakeRange(location, 0);
+    NSString *lastReadHex;
+    
+    while (NSMaxRange(range) < location + length) {
+        NSMutableDictionary *catInfo = [NSMutableDictionary dictionary];
+        // rva64 -> __objc_data _OBJC_METACLASS
+        uint64_t rva64 = [dataController read_uint64:range lastReadHex:&lastReadHex];
+        
+        // rva64_1 -> __objc_const __OBJC_$_CATEGORY
+        uint64_t fileoffset_objc_category = [self RVA64ToFileOffset:rva64];
+        NSRange range_cat_name = NSMakeRange(fileoffset_objc_category, 0);
+        NSRange range_cat_class = NSMakeRange(fileoffset_objc_category, 8);
+        NSRange range_class_meth = NSMakeRange(fileoffset_objc_category, 24);
+        
+        NSString *lastReadHex_cat_name;
+        NSString *lastReadHex_cat_class;
+        NSString *lastReadHex1_class_meth;
+        
+        uint64_t rva64_cat_name = [dataController read_uint64:range_cat_name lastReadHex:&lastReadHex_cat_name];
+        uint64_t rva64_cat_class = [dataController read_uint64:range_cat_class lastReadHex:&lastReadHex_cat_class];
+        uint64_t rva64_class_meth = [dataController read_uint64:range_class_meth lastReadHex:&lastReadHex1_class_meth];
+        
+        if (rva64_cat_class != 0) {
+            NSString *lastReadHex_cat_class_ro;
+            uint64_t fileoffset_cat_class = [self RVA64ToFileOffset:rva64_cat_class];
+            NSRange range_cat_class_ro = NSMakeRange(fileoffset_cat_class, 32);
+            uint64_t rva64_cat_class_ro = [dataController read_uint64:range_cat_class_ro lastReadHex:&lastReadHex_cat_class_ro];
+            
+            uint64_t fileoffset_cat_class_ro = [self RVA64ToFileOffset:rva64_cat_class_ro];
+            NSRange range_cat_class_ro_name = NSMakeRange(fileoffset_cat_class_ro, 24);
+            
+            NSString *lastReadHex_cat_class_ro_name;
+            uint64_t rva64_cat_class_ro_name = [dataController read_uint64:range_cat_class_ro_name lastReadHex:&lastReadHex_cat_class_ro_name];
+            
+            NSRange range_cat_class_ro_name_string = NSMakeRange([self RVA64ToFileOffset:rva64_cat_class_ro_name], 0);
+            NSString *cls_name = [dataController read_string:range_cat_class_ro_name_string lastReadHex:&lastReadHex_cat_name];
+            [catInfo setObject:cls_name forKey:@"c"];
+        } else {
+            uint64_t range_cat_class_int = rva64 + 8;
+            NSString *addrKey = [NSString stringWithFormat:@"%lld", range_cat_class_int];
+            NSString *symbol = [bindSymbolForAddr objectForKey:addrKey];
+            if ([symbol hasPrefix:@"_OBJC_CLASS_$_"]) {
+                symbol = [symbol substringFromIndex:@"_OBJC_CLASS_$_".length];
+            }
+            [catInfo setObject:symbol forKey:@"c"];
+        }
+        
+        uint64_t fileoffset_cat_name = [self RVA64ToFileOffset:rva64_cat_name];
+        NSRange range_get_cat_name = NSMakeRange(fileoffset_cat_name, 0);
+        
+        NSString *cat_name = [dataController read_string:range_get_cat_name lastReadHex:&lastReadHex_cat_name];
+        [catInfo setObject:cat_name forKey:@"ct"];
+        
+        uint32_t fileoffset1_3_1 = [self RVA64ToFileOffset:rva64_class_meth];
+        NSRange range1_3_2 = NSMakeRange(fileoffset1_3_1, 4);  // method count
+        NSString *lastReadHex1_3_2;
+        
+        uint64_t method_count = [dataController read_uint32:range1_3_2 lastReadHex:&lastReadHex1_3_2];
+        uint64_t first_method_addr = fileoffset1_3_1 + 8;
+        uint64_t load_method_addr = 0;
+        for (int i = 0; i < method_count; i ++) {
+            uint64_t temp_method_addr = first_method_addr + i * 8;
+            
+            NSRange range_method_name = NSMakeRange(temp_method_addr, 0);
+            NSRange range_method_imp = NSMakeRange(temp_method_addr, 16);
+            
+            NSString *lastReadHexNameAddr;
+            NSString *lastReadHexMethodImpAddr;
+            
+            uint64_t rva64_method_name_addr = [dataController read_uint64:range_method_name lastReadHex:&lastReadHexNameAddr];
+            uint64_t rva64_method_imp_addr = [dataController read_uint64:range_method_imp lastReadHex:&lastReadHexNameAddr];
+            
+            uint64_t method_name_addr = [self RVA64ToFileOffset:rva64_method_name_addr];
+            NSRange range_method_name_addr = NSMakeRange(method_name_addr, 0);
+            NSString *method_name = [dataController read_string:range_method_name_addr lastReadHex:&lastReadHexNameAddr];
+            
+            if ([method_name isEqualToString:@(LOADSYMBOL)] || [method_name isEqualToString:@(CZLDSYMBOL)]) {
+                load_method_addr = rva64_method_imp_addr;
+                [catInfo setObject:@(load_method_addr) forKey:@"i"];
+                break;
+            }
+        }
+        
+        [catlist addObject:catInfo];
+    }
+    
+    return catlist;
+}
+
+- (void)scheduleClassLoad64:(uint64_t)class_addr {
+    if (class_addr == 0) {
+        return;
+    }
+    
+    NSString *clsName = [self getClassNameByMetaClassAddr64:class_addr];
+    if (![self.classLoadMethods64 containsObject:clsName]) {
+        [self.classLoadMethods64 addObject:clsName];
+        uint64_t fileoffset = [self RVA64ToFileOffset:class_addr];
+        NSRange range = NSMakeRange(fileoffset, 8);
+        NSString *lastReadHex;
+        uint64_t rva64_superclass = [dataController read_uint64:range lastReadHex:&lastReadHex];
+        [self scheduleClassLoad64:rva64_superclass];
+        
+        // Get class info
+        NSMutableDictionary *clsInfo = [NSMutableDictionary dictionary];
+        uint64_t rva64 = class_addr;
+        NSString *cls_name = [self getClassNameByMetaClassAddr64:rva64];
+        
+        uint64_t fileoffset1 = [self RVA64ToFileOffset:rva64];
+        NSRange range1 = NSMakeRange(fileoffset1, 0);
+        NSString *lastReadHex1;
+        uint64_t rva64_metaclass = [dataController read_uint64:range1 lastReadHex:&lastReadHex1];
+        
+        uint64_t fileoffset_metaclass = [self RVA64ToFileOffset:rva64_metaclass];
+        NSRange range_metaclass_ro = NSMakeRange(fileoffset_metaclass + 4 * 8, 0);
+        NSString *lastReadHexMetaClassRO;
+        uint64_t rva64_metaclass_ro = [dataController read_uint64:range_metaclass_ro lastReadHex:&lastReadHexMetaClassRO];
+        
+        uint64_t fileoffset_metaclass_ro = [self RVA64ToFileOffset:rva64_metaclass_ro];
+        NSRange range_metaclass_methods = NSMakeRange(fileoffset_metaclass_ro + 4 * 8, 0);
+        NSString *lastReadHexMetaClassROMethods;
+        uint64_t rva64_metaclass_ro_methods = [dataController read_uint64:range_metaclass_methods lastReadHex:&lastReadHexMetaClassROMethods];
+        
+        if (rva64_metaclass_ro_methods > 0) {
+            uint64_t file_metaclass_ro_methods = [self RVA64ToFileOffset:rva64_metaclass_ro_methods];
+            
+            NSRange range_metaclass_methods_count = NSMakeRange(file_metaclass_ro_methods + 4, 0);
+            NSString *lastReadHexMetaClassROMethodsCount;
+            uint64_t method_count = [dataController read_uint32:range_metaclass_methods_count lastReadHex:&lastReadHexMetaClassROMethodsCount];
+            uint64_t first_method_addr = file_metaclass_ro_methods + 8;
+            uint64_t load_method_addr = 0;
+            
+            for (int i = 0; i < method_count; i ++) {
+                uint64_t temp_method_addr = first_method_addr + i * 3 * 8;
+                
+                NSRange range_method_name = NSMakeRange(temp_method_addr, 0);
+                NSRange range_method_imp = NSMakeRange(temp_method_addr, 16);
+                
+                NSString *lastReadHexNameAddr;
+                NSString *lastReadHexMethodImpAddr;
+                uint64_t rva64_method_name_addr = [dataController read_uint64:range_method_name lastReadHex:&lastReadHexNameAddr];
+                uint64_t rva64_method_imp_addr = [dataController read_uint64:range_method_imp lastReadHex:&lastReadHexMethodImpAddr];
+                
+                NSRange range_method_name_string = NSMakeRange([self RVA64ToFileOffset:rva64_method_name_addr], 0);
+                NSString *method_name = [dataController read_string:range_method_name_string lastReadHex:nil];
+                if ([method_name isEqualToString:@LOADSYMBOL] || [method_name isEqualToString:@CZLDSYMBOL]) {
+                    load_method_addr = rva64_method_imp_addr;
+                    [clsInfo setObject:@(load_method_addr) forKey:@"i"];
+                }
+            }
+            
+            if (load_method_addr) {
+                [clsInfo setObject:cls_name forKey:@"c"];
+                [self.nlclslist64 addObject:clsInfo];
+            }
+        }
+        
+    }
+}
+
+
+
+- (NSString *)getClassNameByMetaClassAddr64:(uint64_t)rva64 {
+    // rva64_1 -> __objc_const _OBJC_CLASS_RO
+    uint64_t fileoffset1 = [self RVA64ToFileOffset:rva64];
+    NSRange range1 = NSMakeRange(fileoffset1 + 32, 0);
+    NSString *lastReadHex1;
+    uint64_t rva64_1 = [dataController read_uint64:range1 lastReadHex:&lastReadHex1];
+    
+    // rva64_2 __objc_classname
+    uint64_t fileoffset2 = [self RVA64ToFileOffset:rva64_1];
+    NSRange range2 = NSMakeRange(fileoffset2, 24);
+    NSString *lastReadHex2;
+    uint64_t rva64_2 = [dataController read_uint64:range2 lastReadHex:&lastReadHex2];
+    
+    // rva64_3 aClassName
+    uint64_t fileoffset3 = [self RVA64ToFileOffset:rva64_2];
+    NSRange range3 = NSMakeRange(fileoffset3, 0);
+    NSString *lastReadHex3;
+    NSString *rva64_3 = [dataController read_string:range3 lastReadHex:&lastReadHex3];
+    return rva64_3;
 }
 
 //-----------------------------------------------------------------------------

@@ -1,0 +1,26 @@
+{
+    "mainlist":[
+        {
+        "cls":"ViewController",
+        "cat":""
+        },
+        {
+        "cls":"CZLoadTestWithoutLoad",
+        "cat":"WithLoad"
+        },
+        {
+        "cls":"CZLoadTest",
+        "cat":""
+        },
+        {
+        "cls":"CZLoadTest",
+        "cat":"WithLoad"
+        }
+    ],
+    "mainbglist":[
+        
+    ],
+    "delaylist":[
+        
+    ]
+}

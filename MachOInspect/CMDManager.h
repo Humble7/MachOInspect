@@ -11,13 +11,9 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface CMDManager : NSObject
 + (CMDManager *)shareInstance;
-// args[1] : Origin Mach-O path
-// args[2] : Modified Mach-O path
-// args[3] : symbol name which should be modified
-// args[4] : new symbol name
-// args[5] : sub section which should be changed
-// args[6] : section which should be changed
-// eg: "/users/App" "/user/App" "load" "czld" "C String Literals" "__TEXT,__objcmethname"
+// args[1] : Mach-O path
+// args[2] : json file path
+// eg: "/users/App" "/check_load_symbol/load_method.json"
 - (void)runWithArgs:(NSArray *)args;
 @end
 
