@@ -53,6 +53,11 @@
       <CommandLineArguments>
          <CommandLineArgument
             argument = "&quot;${SRCROOT}/MachOHackedProduct/CZAppLaunchKit_Example&quot;"
+
+            isEnabled = "NO">
+         </CommandLineArgument>
+         <CommandLineArgument
+            argument = "&quot;${SRCROOT}/MachOHackedProduct/LoadMangerDemo&quot;"
             isEnabled = "YES">
          </CommandLineArgument>
          <CommandLineArgument

@@ -150,6 +150,11 @@ NSString * const MVScannerErrorMessage = @"NSScanner error";
 }
 
 // inputInfo: 从Json文件中读取的内容
+// machOInfo: 从__objc_nlclslist段和__objc_nlcatlist分别读取实现了load方法的class和category
+// -- case1: 类和分类都实现了load方法。__objc_nlclslist有class信息，__objc_nlcatlist有category信息
+// -- case2: 类实现了load方法，分类没有实现load方法。只有__objc_nlclslist有class信息
+// -- case4: 类没有实现load方法，只有一个分类实现了load方法。此时__objc_nlclslist有class信息，__objc_nlcatlist无category信息
+// -- case4: 类没有实现load方法，有一个以上的分类实现了load方法。此时__objc_nlclslist无class信息，__objc_nlcatlist有category信息
 - (NSArray *)isLoadClassInput:(NSDictionary *)inputInfo containLoadClassFromMachO:(NSDictionary *)machOInfo {
     NSMutableDictionary *inputDict = [NSMutableDictionary dictionary];
     NSMutableArray *result = [NSMutableArray array];
@@ -220,25 +225,41 @@ NSString * const MVScannerErrorMessage = @"NSScanner error";
     
     NSMutableArray *checkedResult = [NSMutableArray array];
     for (int i = 0; i < result.count; i ++) {
-        NSString *key = [result objectAtIndex:i];
-        if ([key containsString:@"("] && [key containsString:@")"]) {
+        NSString *clsOrCatNameInMachO = [result objectAtIndex:i];
+        if ([self isCategory:clsOrCatNameInMachO]) {
             // cat method in machO not found
-            [checkedResult addObject:key];
+            [checkedResult addObject:clsOrCatNameInMachO];
         } else {
-            [checkedResult addObject:key];
+            [checkedResult addObject:clsOrCatNameInMachO];
             
-            // 如果一个本地类，只在category里面实现了load方法，编译器不会把方法放进__objc_catlist和_objc_nlcatlist
+            // 处理case 4
             // 此处加判断，如果在类中的配置没有被消耗，在cat中将会使用这次配置
+            // 用户在load_config文件中配置了注册了Category，但由于此时命中了case4，所以没有category的信息，只有class的信息。此时尝试将配置文件中的category部分移除掉去匹配class名
             for (int i = 0; i < inputDict.allKeys.count; i ++) {
-                NSString *kkey = [inputDict.allKeys objectAtIndex:i];
-                if ([kkey containsString:key] && ![checkedList objectForKey:kkey]) {
-                    [checkedResult removeObject:key];
+                NSString *clsOrCatNameInJson = [inputDict.allKeys objectAtIndex:i];
+                if ([self isCategory:clsOrCatNameInJson] && [[self extractClassFromCategory:clsOrCatNameInJson] isEqualToString:clsOrCatNameInMachO] && ![checkedList objectForKey:clsOrCatNameInJson]) {
+                    [checkedResult removeObject:clsOrCatNameInMachO];
                     break;
                 }
             }
         }
     }
     return checkedResult;
+}
+
+- (BOOL)isCategory:(NSString *)name {
+    if (!name) return NO;
+    return [name containsString:@"("] && [name containsString:@")"];
+}
+
+- (NSString *)extractClassFromCategory:(NSString *)category {
+    if (!category || category.length == 0) return @"";
+    
+    NSRange catRange = [category rangeOfString:@"("];
+    NSRange classRange = NSMakeRange(0, catRange.location);
+    
+    NSString *ret = [category substringWithRange:classRange];
+    return ret;
 }
 
 @end
